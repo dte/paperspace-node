@@ -3,7 +3,7 @@
 // Native
 var argv = require('yargs').argv;
 
-// Convert arg values that look boolean to boolean
+// Convert arg value	s that look boolean to boolean
 for (var arg in argv) {
 	if (arg !== '$0' && typeof argv[arg] === 'string') {
 		var val = argv[arg];
@@ -21,99 +21,106 @@ var chalk = require('chalk');
 
 // Ours
 var paperspace = require('./../lib/paperspace');
+const { handleError, error } = require('../lib/error');
+const login = require('../lib/login');
+const cfg = require('../lib/cfg');
+const { version } = require('../lib/pkg');
+const ua = require('../lib/ua');
+const help = require('../lib/cmds');
 
-var DEETS_NOTE = 'See https://paperspace.github.io/paperspace-node for details';
-
-function methodHint(spec) {
-	return [
-		'Usage:',
-		'  paperspace ' + spec.method.group + ' ' + spec.name,
-		'',
-		DEETS_NOTE,
-	].join('\n');
-}
-
-function methodHints() {
-	var namespaces = {};
-
-	paperspace.eachEndpoint(function _each(namespace, name, method) {
-		if (!namespaces[namespace]) namespaces[namespace] = [];
-		namespaces[namespace].push(name);
-	});
-
-	var hints = '';
-
-	for (var namespace in namespaces) {
-		hints += '\t  ' + namespace + '\n';
-
-		var names = namespaces[namespace];
-
-		names.forEach(function(name) {
-			hints += '\t    ' + name + '\n';
-		});
-	}
-
-	return hints;
-}
+const apiUrl = 'https://dev-api.paperspace.io/';
+const shouldLogin = argv.login;
 
 if (!givenNamespace && !givenName) {
-	console.log();
-	console.log('    ' + chalk.bold('paperspace') + ' <namespace> <command> [...flags]');
-	console.log();
-	console.log('    ' + chalk.dim('Commands:'));
-	console.log();
-	console.log('    ' + methodHints());
-	console.log();
-	console.log('    ---');
-	console.log('    ' + chalk.dim(DEETS_NOTE));
-	console.log('');
-
+	help()
 	process.exit();
 }
 
-var foundMethod;
 
-paperspace.eachEndpoint(function _each(namespace, name, method) {
-	if (namespace === givenNamespace && name == givenName) {
-		foundMethod = {
-			namespace: namespace,
-			name: name,
-			method: method,
-		};
-	}
-});
-
-if (!foundMethod) {
-	console.error('No such command `' + givenNamespace + ' ' + givenName + '`');
+const stopDeployment = msg => {
+	error(msg);
 	process.exit(1);
-}
+};
 
-if (argv.help) {
-	console.log(methodHint(foundMethod));
-	process.exit();
-}
+async function main() {
+	let config = await cfg.read({ token: argv.token });
 
-function safeJSON(obj) {
-	try {
-		return JSON.stringify(obj, null, 2) + '\n';
-	} catch (err) {
-		console.error(err);
-		return '{}';
+	console.log(config);
+
+	let token = argv.token || config.token;
+	if (!token || shouldLogin) {
+		try {
+			token = await login(apiUrl);
+			config = await cfg.read();
+		} catch (err) {
+			return stopDeployment(`Authentication error – ${err.message}`);
+		}
+		if (shouldLogin) {
+			console.log('> Logged in successfully. Token saved in ~/.paperspace.json');
+			return exit(0);
+		}
 	}
+  //
+	// // If we got to here then `token` should be set
+	// try {
+	// 	await create({ token, config });
+	// 	// await sync({ token, config });
+	// } catch (err) {
+	// 	return stopDeployment(`Unknown error: ${err}\n${err.stack}`);
+	// }
 }
 
-foundMethod.method(argv, function _methodCb(methodErr, methodResp) {
-	if (methodErr) {
-		process.stdout.write(
-			safeJSON({
-				error: methodErr.message,
-				status: methodResp && methodResp.statusCode,
-				response: methodResp && methodResp.body,
-			})
-		);
+console.log(givenName);
+console.log(givenNamespace);
 
+if (givenNamespace == 'login') {
+	main();
+} else {
+
+	var foundMethod;
+
+	paperspace.eachEndpoint(function _each(namespace, name, method) {
+		if (namespace === givenNamespace && name == givenName) {
+			foundMethod = {
+				namespace: namespace,
+				name: name,
+				method: method,
+			};
+		}
+	});
+
+	if (!foundMethod) {
+		console.error('No such command `' + givenNamespace + ' ' + givenName + '`');
 		process.exit(1);
 	}
 
-	process.stdout.write(safeJSON(methodResp.body || {}));
-});
+	if (argv.help) {
+		help()
+		process.exit();
+	}
+
+	function safeJSON(obj) {
+		try {
+			return JSON.stringify(obj, null, 2) + '\n';
+		} catch (err) {
+			console.error(err);
+			return '{}';
+		}
+	}
+
+	foundMethod.method(argv, function _methodCb(methodErr, methodResp) {
+		if (methodErr) {
+			process.stdout.write(
+				safeJSON({
+					error: methodErr.message,
+					status: methodResp && methodResp.statusCode,
+					response: methodResp && methodResp.body,
+				})
+			);
+
+			process.exit(1);
+		}
+
+		process.stdout.write(safeJSON(methodResp.body || {}));
+	});
+}

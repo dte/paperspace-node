@@ -1,3 +1,4 @@
 #!/usr/bin/env node
 
-require('./../cli');
+// require('./../cli');
+require('./../dist/ps.js');
